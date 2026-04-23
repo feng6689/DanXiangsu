@@ -20,31 +20,39 @@ pixels = H * W #总像素
 # hadamard矩阵
 H_mat = hadamard(pixels)
 
-# 含噪测量
+# 含噪测量（噪声加在测量信号上）
 measurements = []
 for i in range(pixels): # 获取第i对差分图案
     row = H_mat[i, :]
     pattern_pos = (row.reshape((H, W)) + 1) / 2 # 正
     pattern_neg = 1 - pattern_pos # 负
 
-    # 加噪
-    noisy_scene = scene.copy()
-    if noise_type == 'gaussian':
-        noise = np.random.normal(0, noise_param, noisy_scene.shape)
-        noisy_scene = noisy_scene + noise
-    elif noise_type == 'salt_pepper':
-        salt = np.random.rand(*noisy_scene.shape) < noise_param / 2
-        pepper = np.random.rand(*noisy_scene.shape) < noise_param / 2
-        noisy_scene[salt] = 1.0
-        noisy_scene[pepper] = 0.0
-    elif noise_type == 'none':
-        pass
-    noisy_scene = np.clip(noisy_scene, 0.0, 1.0)
+    # 干净的差分测量
+    I_pos_clean = np.sum(scene * pattern_pos)
+    I_neg_clean = np.sum(scene * pattern_neg)
+    measurement_clean = I_pos_clean - I_neg_clean
 
-    # 差分测量
-    I_pos = np.sum(noisy_scene * pattern_pos)
-    I_neg = np.sum(noisy_scene * pattern_neg)
-    measurements.append(I_pos - I_neg) # 加到数组末尾
+    # 在测量信号上加噪
+    if noise_type == 'gaussian':
+        # 等效：sum(noise.flatten() * row)，其中 noise ~ N(0, noise_param)
+        # 由于 row[i] 为±1，sum(noise.flatten() * row) ~ N(0, noise_param * sqrt(pixels))
+        noise_signal = np.random.normal(0, noise_param * np.sqrt(pixels))
+        measurement_noisy = measurement_clean + noise_signal
+    elif noise_type == 'salt_pepper':
+        # 生成噪声掩码（不修改原图），计算噪声对测量值的影响
+        salt = np.random.rand(*scene.shape) < noise_param / 2
+        pepper = np.random.rand(*scene.shape) < noise_param / 2
+        
+        # 计算噪声引起的测量值变化
+        # noisy_scene - scene：对于盐噪声是 (1 - scene)，对于胡椒噪声是 (0 - scene)
+        noise_effect = np.sum((1.0 - scene[salt]) * row.reshape((H, W))[salt])
+        noise_effect += np.sum((0.0 - scene[pepper]) * row.reshape((H, W))[pepper])
+        
+        measurement_noisy = measurement_clean + noise_effect
+    elif noise_type == 'none':
+        measurement_noisy = measurement_clean
+    
+    measurements.append(measurement_noisy) # 加到数组末尾
 
 measurements = np.array(measurements)
 
